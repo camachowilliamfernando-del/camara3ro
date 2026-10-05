@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CromaSense · El ojo digital del color</title>
+<!-- hugo palacios, alex criollo, elian ordoñez, jeniffer lema, jhon castillo, melissa corella -->
+<!-- ===== PWA ===== -->
+<meta name="theme-color" content="#10b981">
+<meta name="color-scheme" content="dark light">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CromaSense">
+<meta name="application-name" content="CromaSense">
+<meta name="format-detection" content="telephone=no">
+<meta name="msapplication-TileColor" content="#10b981">
+<meta name="msapplication-tap-highlight" content="no">
+<meta name="description" content="Identifica colores con IA desde la cámara o sliders. Aprende colores personalizados y entrena tu propio modelo en el navegador.">
+<link id="manifest-link" rel="manifest">
+<link id="apple-icon" rel="apple-touch-icon">
+<link id="favicon" rel="icon" type="image/png">
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+<style>
+:root{
+  --bg:#0c0f0d;
+  --bg-grad:radial-gradient(circle at 20% 0%, rgba(16,185,129,.16), transparent 50%),
+            radial-gradient(circle at 80% 100%, rgba(251,191,36,.12), transparent 55%);
+  --surface:rgba(20,26,22,.85);
+  --surface-2:rgba(30,38,32,.7);
+  --border:rgba(16,185,129,.22);
+  --border-hover:rgba(251,191,36,.45);
+  --accent:#10b981;
+  --accent-2:#fbbf24;
+  --accent-3:#f472b6;
+  --text:#ecfdf5;
+  --text-dim:#94a89c;
+  --shadow:0 20px 50px rgba(0,0,0,.7);
+  --radius-xl:32px;
+  --radius-lg:20px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:'Inter','SF Pro Display','Segoe UI',system-ui,sans-serif;
+  background:var(--bg);
+  background-image:var(--bg-grad);
+  background-attachment:fixed;
+  color:var(--text);
+  min-height:100vh;min-height:100dvh;
+  padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right))
+          max(24px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));
+  transition:background .6s ease;
+  -webkit-font-smoothing:antialiased;
+  overscroll-behavior:none;
+  -webkit-tap-highlight-color:transparent;
+}
+header{text-align:center;margin:12px 0 30px}
+.logo{display:inline-flex;align-items:center;gap:12px;margin-bottom:8px}
+.logo-icon{
+  width:46px;height:46px;border-radius:14px;
+  background:conic-gradient(from 90deg,#10b981,#fbbf24,#f472b6,#34d399,#10b981);
+  box-shadow:0 0 30px rgba(16,185,129,.55), inset 0 0 12px rgba(255,255,255,.15);
+  animation:spin 9s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.logo-icon{animation:none}}
+h1{
+  font-size:clamp(1.9rem,6vw,2.9rem);font-weight:800;letter-spacing:-.03em;
+  background:linear-gradient(135deg,#6ee7b7 0%,#fbbf24 50%,#f472b6 100%);
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
+  filter:drop-shadow(0 4px 20px rgba(16,185,129,.35));
+}
+.subtitle{font-size:clamp(.85rem,2.4vw,1rem);color:var(--text-dim);letter-spacing:.04em}
+main{display:grid;gap:22px;grid-template-columns:1fr;max-width:1120px;margin:0 auto}
+@media(min-width:840px){main{grid-template-columns:1fr 1fr;align-items:start}}
+.card{
+  background:var(--surface);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  border-radius:var(--radius-xl);padding:clamp(20px,3.5vw,30px);
+  border:1px solid var(--border);
+  box-shadow:var(--shadow), inset 0 1px 0 rgba(255,255,255,.04);
+  transition:border-color .4s, box-shadow .4s;
+}
+.card:hover{border-color:var(--border-hover)}
+.card.alta-certeza{animation:glowPulse 1.8s ease-in-out infinite}
+@keyframes glowPulse{
+  0%{box-shadow:0 0 0 0 rgba(251,191,36,.55), var(--shadow)}
+  50%{box-shadow:0 0 38px 8px rgba(251,191,36,.35), var(--shadow)}
+  100%{box-shadow:0 0 0 0 rgba(251,191,36,0), var(--shadow)}
+}
+@media(prefers-reduced-motion:reduce){.card.alta-certeza{animation:none}}
+h2{
+  font-size:1.1rem;font-weight:600;margin-bottom:16px;color:#e2e8f0;
+  display:flex;align-items:center;gap:10px;letter-spacing:-.01em;
+}
+h2::before{
+  content:'';width:6px;height:22px;border-radius:6px;
+  background:linear-gradient(180deg,var(--accent),var(--accent-2));
+  box-shadow:0 0 12px rgba(16,185,129,.6);
+}
+.preview{
+  width:100%;height:clamp(120px,26vw,160px);border-radius:var(--radius-lg);
+  margin-bottom:20px;border:1px solid rgba(255,255,255,.08);
+  box-shadow:inset 0 0 60px rgba(0,0,0,.5);
+  transition:background .15s;position:relative;overflow:hidden;
+}
+.preview::after{
+  content:'';position:absolute;inset:0;
+  background:radial-gradient(circle at 30% 20%, rgba(255,255,255,.14), transparent 55%);
+  pointer-events:none;
+}
+.resultado{
+  padding:26px 22px;border-radius:var(--radius-lg);
+  background:linear-gradient(160deg, rgba(16,185,129,.08), rgba(251,191,36,.05));
+  text-align:center;border:1px solid rgba(255,255,255,.08);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.05);
+  margin-bottom:18px;
+}
+.categoria{
+  font-size:clamp(1.8rem,6vw,2.5rem);font-weight:800;margin-bottom:8px;
+  overflow-wrap:anywhere;letter-spacing:-.02em;
+  background:linear-gradient(135deg,#6ee7b7,#fbbf24);
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
+}
+.familia{font-size:.95rem;color:var(--text-dim);font-weight:400;letter-spacing:.02em}
+.certeza{font-size:1rem;color:#cbd5e1;margin-top:10px}
+.barra{
+  height:12px;border-radius:12px;background:rgba(255,255,255,.06);
+  margin-top:14px;overflow:hidden;box-shadow:inset 0 1px 3px rgba(0,0,0,.5);
+}
+.barra span{
+  display:block;height:100%;width:0;border-radius:12px;
+  transition:width .5s cubic-bezier(.2,.9,.3,1);
+  background:linear-gradient(90deg,var(--accent),var(--accent-2));
+  box-shadow:0 0 16px rgba(251,191,36,.6);
+}
+.top3{list-style:none;margin-top:18px;text-align:left;font-size:.9rem;color:#b9c2d9}
+.top3 li{
+  display:flex;justify-content:space-between;gap:8px;
+  padding:8px 0;border-bottom:1px solid rgba(255,255,255,.06);
+}
+.top3 li:last-child{border-bottom:none}
+.top3 li b{color:#fff;font-weight:700}
+.duo{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px}
+.muestra{
+  border-radius:var(--radius-lg);padding:14px;background:var(--surface-2);
+  text-align:center;min-width:0;border:1px solid rgba(255,255,255,.06);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
+}
+.muestra .caja{
+  height:clamp(70px,16vw,100px);border-radius:14px;
+  border:1px solid rgba(255,255,255,.15);margin-bottom:10px;
+  box-shadow:inset 0 0 25px rgba(0,0,0,.35);
+}
+.muestra small{
+  display:block;color:var(--text-dim);font-size:.72rem;
+  letter-spacing:.05em;text-transform:uppercase;font-weight:500;
+}
+.muestra b{
+  display:block;font-size:.95rem;overflow-wrap:anywhere;color:#e2e8f0;
+  font-weight:600;margin-top:2px;
+}
+.slider-group{margin-bottom:18px}
+.slider-group label{
+  display:flex;justify-content:space-between;align-items:center;
+  font-weight:500;margin-bottom:8px;font-size:.9rem;color:var(--text-dim);letter-spacing:.02em;
+}
+.slider-group label span{
+  font-weight:700;color:#fff;background:rgba(16,185,129,.15);
+  padding:2px 12px;border-radius:20px;font-size:.85rem;
+  border:1px solid rgba(16,185,129,.3);min-width:48px;text-align:center;
+}
+input[type=range]{
+  width:100%;height:6px;border-radius:6px;background:rgba(255,255,255,.07);
+  outline:none;-webkit-appearance:none;appearance:none;touch-action:pan-y;
+  box-shadow:inset 0 1px 3px rgba(0,0,0,.5);
+}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:26px;height:26px;border-radius:50%;cursor:pointer;
+  border:3px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.3), 0 4px 14px rgba(0,0,0,.5);
+  transition:transform .15s;
+}
+input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.15)}
+input[type=range]::-moz-range-thumb{
+  width:26px;height:26px;border-radius:50%;cursor:pointer;
+  border:3px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.3), 0 4px 14px rgba(0,0,0,.5);
+}
+#sliderR::-webkit-slider-thumb{background:#f87171}
+#sliderG::-webkit-slider-thumb{background:#4ade80}
+#sliderB::-webkit-slider-thumb{background:#60a5fa}
+#sliderR::-moz-range-thumb{background:#f87171}
+#sliderG::-moz-range-thumb{background:#4ade80}
+#sliderB::-moz-range-thumb{background:#60a5fa}
+.btn-group{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+button{
+  flex:1;min-width:130px;min-height:50px;padding:12px 18px;border:none;border-radius:16px;
+  font-size:.95rem;font-weight:600;font-family:inherit;cursor:pointer;
+  background:linear-gradient(135deg,#10b981,#047857);color:#fff;
+  transition:transform .12s, filter .2s, box-shadow .25s;
+  box-shadow:0 8px 20px rgba(16,185,129,.3);letter-spacing:.01em;
+}
+button:hover{filter:brightness(1.15);box-shadow:0 10px 28px rgba(16,185,129,.45)}
+button:active{transform:scale(.97)}
+button:disabled{opacity:.55;cursor:wait;filter:grayscale(.4)}
+button:focus-visible,input:focus-visible{outline:3px solid var(--accent-2);outline-offset:3px}
+.entrenar{background:linear-gradient(135deg,#fbbf24,#d97706);box-shadow:0 8px 20px rgba(251,191,36,.3);color:#1a1206}
+.camara{background:linear-gradient(135deg,#f472b6,#be185d);box-shadow:0 8px 20px rgba(244,114,182,.3)}
+.sec{background:linear-gradient(135deg,#334155,#1e293b);color:#e2e8f0;box-shadow:0 8px 20px rgba(0,0,0,.4)}
+.guardar{background:linear-gradient(135deg,#34d399,#059669);box-shadow:0 8px 20px rgba(52,211,153,.3)}
+.nombre-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+input[type=text]{
+  flex:2;min-width:140px;min-height:50px;padding:12px 18px;border-radius:16px;
+  border:1px solid rgba(255,255,255,.1);background:rgba(12,15,13,.7);color:#fff;
+  font-size:1rem;font-family:inherit;transition:border .2s, box-shadow .2s;
+}
+input[type=text]:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 3px rgba(16,185,129,.25)}
+.nombre-row button{flex:1}
+video{
+  width:100%;max-height:50vh;object-fit:cover;border-radius:var(--radius-lg);
+  margin-top:16px;display:none;border:1px solid rgba(255,255,255,.1);
+  box-shadow:0 14px 32px rgba(0,0,0,.6);
+}
+canvas{display:none}
+.info{
+  margin-top:12px;font-size:.88rem;color:var(--text-dim);
+  text-align:center;overflow-wrap:anywhere;line-height:1.5;
+}
+.info.error{color:#fca5a5;background:rgba(239,68,68,.08);padding:10px;border-radius:12px;border:1px solid rgba(239,68,68,.2)}
+.info.ok{color:#6ee7b7;background:rgba(16,185,129,.08);padding:10px;border-radius:12px;border:1px solid rgba(16,185,129,.2)}
+.chip-sw{
+  display:inline-block;width:22px;height:22px;border-radius:8px;
+  vertical-align:middle;margin:0 6px;border:2px solid rgba(255,255,255,.4);
+  box-shadow:0 2px 10px rgba(0,0,0,.4);
+}
+#lista{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.chip{
+  display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.05);
+  border-radius:40px;padding:6px 10px 6px 14px;font-size:.85rem;
+  border:1px solid rgba(255,255,255,.08);box-shadow:0 2px 10px rgba(0,0,0,.3);
+  transition:border-color .2s;
+}
+.chip:hover{border-color:rgba(16,185,129,.45)}
+.chip i{
+  width:18px;height:18px;border-radius:50%;
+  border:2px solid rgba(255,255,255,.5);box-shadow:0 0 8px rgba(0,0,0,.4);
+}
+.chip button{
+  all:unset;cursor:pointer;padding:2px 10px;color:#f87171;
+  font-weight:700;min-height:0;font-size:1rem;transition:color .2s;
+}
+.chip button:hover{color:#ef4444}
+.estado{
+  font-size:.9rem;color:#fbbf24;margin-top:12px;
+  text-align:center;min-height:1.4em;font-weight:500;
+}
+.prog{
+  height:8px;border-radius:8px;background:rgba(255,255,255,.06);
+  margin-top:14px;overflow:hidden;display:none;
+}
+.prog span{
+  display:block;height:100%;width:0;
+  background:linear-gradient(90deg,#fbbf24,#34d399);
+  transition:width .25s;border-radius:8px;
+  box-shadow:0 0 12px rgba(251,191,36,.6);
+}
+.nota{
+  grid-column:1/-1;font-size:.8rem;color:#64748b;text-align:center;
+  line-height:1.6;padding:0 10px;margin-top:8px;max-width:680px;
+  margin-left:auto;margin-right:auto;
+}
+.divider{
+  height:1px;background:linear-gradient(90deg,transparent,rgba(16,185,129,.25),transparent);
+  margin:24px 0 20px;
+}
+#btnInstalar{
+  position:fixed;bottom:max(20px,env(safe-area-inset-bottom));right:20px;z-index:9999;
+  display:none;padding:14px 22px;border-radius:50px;
+  background:linear-gradient(135deg,#10b981,#047857);
+  color:#fff;font-weight:700;border:none;cursor:pointer;
+  box-shadow:0 10px 30px rgba(16,185,129,.5);
+  font-family:inherit;font-size:.95rem;flex:none;min-width:0;
+  animation:floatBtn 3s ease-in-out infinite;
+}
+#btnInstalar.show{display:block}
+@keyframes floatBtn{
+  0%,100%{transform:translateY(0)}
+  50%{transform:translateY(-6px)}
+}
+@media(prefers-reduced-motion:reduce){#btnInstalar{animation:none}}
+#iosAviso{
+  position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:10000;
+  display:none;align-items:center;justify-content:center;padding:24px;
+  backdrop-filter:blur(6px);
+}
+#iosAviso.show{display:flex}
+#iosAviso .caja{
+  background:#141a16;border:1px solid rgba(16,185,129,.4);border-radius:24px;
+  padding:28px 22px;max-width:360px;text-align:center;
+  box-shadow:0 20px 60px rgba(0,0,0,.8);
+}
+#iosAviso h3{color:#6ee7b7;font-size:1.2rem;margin-bottom:14px}
+#iosAviso p{color:#cbd5e1;font-size:.92rem;line-height:1.6;margin-bottom:10px}
+#iosAviso .icono{font-size:2.5rem;margin-bottom:10px}
+#iosAviso button{
+  margin-top:16px;width:100%;
+}
+@media (max-width:768px){
+  input[type=text], input[type=range], button{font-size:16px}
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">
+    <div class="logo-icon"></div>
+    <h1>CromaSense</h1>
+  </div>
+  <p class="subtitle">El ojo digital del color · Impulsado por TensorFlow.js</p>
+</header>
+
+<main>
+  <section class="card" id="tarjetaPrincipal">
+    <h2>Análisis de CromaSense</h2>
+
+    <div class="resultado">
+      <div class="categoria" id="categoria">Esperando...</div>
+      <div class="familia" id="familia"></div>
+      <div class="certeza" id="certeza">Entrena la IA y mueve los sliders</div>
+      <div class="barra"><span id="barra"></span></div>
+      <ul class="top3" id="top3"></ul>
+    </div>
+
+    <div class="duo">
+      <div class="muestra">
+        <div class="caja" id="cajaMostrado"></div>
+        <small>Color mostrado</small>
+        <b id="txtMostrado">RGB(128,128,128)</b>
+      </div>
+      <div class="muestra">
+        <div class="caja" id="cajaEntrenado"></div>
+        <small>Coincidencia</small>
+        <b id="txtEntrenado">—</b>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" id="tarjetaEntrada">
+    <h2>Explora un color</h2>
+    <div class="preview" id="preview"></div>
+    <div class="slider-group">
+      <label for="sliderR">Rojo <span id="valR">128</span></label>
+      <input type="range" id="sliderR" min="0" max="255" value="128">
+    </div>
+    <div class="slider-group">
+      <label for="sliderG">Verde <span id="valG">128</span></label>
+      <input type="range" id="sliderG" min="0" max="255" value="128">
+    </div>
+    <div class="slider-group">
+      <label for="sliderB">Azul <span id="valB">128</span></label>
+      <input type="range" id="sliderB" min="0" max="255" value="128">
+    </div>
+
+    <div class="btn-group">
+      <button id="btnClasificar">🔍 Identificar color</button>
+      <button id="btnEntrenar" class="entrenar">🧠 Entrenar IA</button>
+    </div>
+    <div class="prog" id="prog"><span id="progBar"></span></div>
+    <div class="estado" id="estado"></div>
+
+    <h2 style="margin-top:26px">Enseña un color nuevo</h2>
+    <div class="nombre-row">
+      <input type="text" id="nombreColor" placeholder="Ej. Verde limón" maxlength="30" autocomplete="off">
+      <button id="btnGuardarColor" class="guardar">💾 Guardar</button>
+    </div>
+    <div id="lista"></div>
+
+    <div class="divider"></div>
+
+    <h2>Cámara en vivo</h2>
+    <div class="btn-group">
+      <button id="btnCamara" class="camara">📷 Activar</button>
+      <button id="btnDetenerCamara" class="sec">⏹ Detener</button>
+    </div>
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvasCamara"></canvas>
+    <div class="info" id="infoCamara"></div>
+
+    <div class="btn-group" style="margin-top:22px">
+      <button id="btnBorrar" class="sec">🗑 Borrar memoria</button>
+    </div>
+  </section>
+
+  <p class="nota">💡 CromaSense aprende ~70 colores con nombre más los que tú guardes. Al entrenar, el modelo se guarda en este navegador y se carga solo la próxima vez. La cámara requiere HTTPS, localhost o Firefox.</p>
+</main>
+
+<!-- Botón flotante instalar PWA -->
+<button id="btnInstalar">⬇️ Instalar app</button>
+
+<!-- Aviso iOS -->
+<div id="iosAviso">
+  <div class="caja">
+    <div class="icono">📲</div>
+    <h3>Instalar CromaSense en iOS</h3>
+    <p>1. Toca el botón <b>Compartir</b> 📤 en Safari</p>
+    <p>2. Desplázate y elige <b>"Añadir a pantalla de inicio"</b></p>
+    <p>3. Confirma tocando <b>"Añadir"</b></p>
+    <button id="cerrarAviso">Entendido</button>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   PWA NATIVA COMPLETA - CROMASENSE
+   Manifest + Service Worker + Iconos + Instalación
+   Todo embebido en el index.html (sin archivos externos)
+   ============================================================ */
+(function setupPWA(){
+  'use strict';
+
+  /* ---------- 1. GENERADOR DE ICONOS CON CANVAS ---------- */
+  function crearIcono(size, maskable = false){
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const g = c.getContext('2d');
+
+    const pad = maskable ? size * 0.15 : 0;
+    const grd = g.createLinearGradient(0, 0, size, size);
+    grd.addColorStop(0,   '#10b981');
+    grd.addColorStop(0.5, '#fbbf24');
+    grd.addColorStop(1,   '#f472b6');
+    g.fillStyle = grd;
+    g.fillRect(0, 0, size, size);
+
+    const cx = size / 2, cy = size / 2;
+    const rx = (size - pad * 2) * 0.36;
+    const ry = (size - pad * 2) * 0.22;
+
+    g.fillStyle = 'rgba(12,15,13,.92)';
+    g.beginPath();
+    g.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+    g.fill();
+
+    g.fillStyle = '#ffffff';
+    g.beginPath();
+    g.arc(cx, cy, size * 0.13, 0, Math.PI * 2);
+    g.fill();
+
+    g.fillStyle = '#0c0f0d';
+    g.beginPath();
+    g.arc(cx, cy, size * 0.07, 0, Math.PI * 2);
+    g.fill();
+
+    g.fillStyle = 'rgba(255,255,255,.85)';
+    g.beginPath();
+    g.arc(cx - size * 0.10, cy - size * 0.08, size * 0.035, 0, Math.PI * 2);
+    g.fill();
+
+    return c.toDataURL('image/png');
+  }
+
+  const icon192 = crearIcono(192);
+  const icon512 = crearIcono(512);
+  const iconMaskable = crearIcono(512, true);
+  const appleIcon = crearIcono(180);
+
+  const favicon = document.getElementById('favicon');
+  const appleLink = document.getElementById('apple-icon');
+  if (favicon)  favicon.href = icon192;
+  if (appleLink) appleLink.href = appleIcon;
+
+  /* ---------- 2. MANIFEST EMBEBIDO COMO DATA URI ---------- */
+  const manifest = {
+    name: "CromaSense · El ojo digital del color",
+    short_name: "CromaSense",
+    description: "Identifica colores con IA desde la cámara o sliders. Aprende colores personalizados y entrena tu propio modelo en el navegador.",
+    start_url: ".",
+    scope: ".",
+    display: "standalone",
+    display_override: ["window-controls-overlay", "standalone", "minimal-ui"],
+    orientation: "any",
+    background_color: "#0c0f0d",
+    theme_color: "#10b981",
+    lang: "es",
+    dir: "ltr",
+    categories: ["utilities", "education", "productivity"],
+    prefer_related_applications: false,
+    icons: [
+      { src: icon192,      sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: icon512,      sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: iconMaskable, sizes: "512x512", type: "image/png", purpose: "maskable" },
+      { src: appleIcon,    sizes: "180x180", type: "image/png", purpose: "any" }
+    ],
+    shortcuts: [
+      {
+        name: "Activar cámara",
+        short_name: "Cámara",
+        description: "Abre directamente la cámara en vivo",
+        url: "./?accion=camara",
+        icons: [{ src: icon192, sizes: "192x192", type: "image/png" }]
+      },
+      {
+        name: "Entrenar IA",
+        short_name: "Entrenar",
+        description: "Entrena el modelo con los colores actuales",
+        url: "./?accion=entrenar",
+        icons: [{ src: icon192, sizes: "192x192", type: "image/png" }]
+      }
+    ]
+  };
+
+  const manifestJSON = JSON.stringify(manifest);
+  const manifestDataURI = 'data:application/manifest+json;charset=utf-8,' + encodeURIComponent(manifestJSON);
+
+  const manifestLink = document.getElementById('manifest-link');
+  if (manifestLink) manifestLink.href = manifestDataURI;
+
+  /* ---------- 3. SERVICE WORKER EMBEBIDO ---------- */
+  if ('serviceWorker' in navigator && window.isSecureContext) {
+    const swCode = `
+      const CACHE = 'cromasense-v2';
+      const CORE_ASSETS = [
+        './',
+        './index.html',
+        'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js'
+      ];
+
+      self.addEventListener('install', event => {
+        event.waitUntil(
+          caches.open(CACHE).then(cache =>
+            Promise.allSettled(
+              CORE_ASSETS.map(url => cache.add(url).catch(() => null))
+            )
+          ).then(() => self.skipWaiting())
+        );
+      });
+
+      self.addEventListener('activate', event => {
+        event.waitUntil(
+          caches.keys()
+            .then(keys => Promise.all(
+              keys.filter(k => k !== CACHE).map(k => caches.delete(k))
+            ))
+            .then(() => self.clients.claim())
+        );
+      });
+
+      self.addEventListener('fetch', event => {
+        const req = event.request;
+        if (req.method !== 'GET') return;
+        if (!req.url.startsWith('http')) return;
+
+        event.respondWith(
+          caches.match(req).then(cached => {
+            const networkFetch = fetch(req).then(res => {
+              if (res && res.status === 200 && res.type !== 'opaque') {
+                const clone = res.clone();
+                caches.open(CACHE).then(c => c.put(req, clone));
+              }
+              return res;
+            }).catch(() => cached);
+
+            return cached || networkFetch;
+          })
+        );
+      });
+
+      self.addEventListener('message', event => {
+        if (event.data === 'SKIP_WAITING') self.skipWaiting();
+      });
+    `;
+
+    const swBlob = new Blob([swCode], { type: 'application/javascript' });
+    const swURL = URL.createObjectURL(swBlob);
+
+    navigator.serviceWorker.register(swURL, { scope: './' })
+      .then(reg => {
+        console.log('✅ Service Worker registrado');
+        reg.addEventListener('updatefound', () => {
+          const newWorker = reg.installing;
+          if (!newWorker) return;
+          newWorker.addEventListener('statechange', () => {
+            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+              console.log('🔄 Nueva versión disponible');
+            }
+          });
+        });
+      })
+      .catch(err => console.warn('⚠️ SW no registrado:', err.message));
+  }
+
+  /* ---------- 4. BOTÓN DE INSTALACIÓN Y DETECCIÓN ---------- */
+  let deferredPrompt = null;
+  const btn = document.getElementById('btnInstalar');
+  const aviso = document.getElementById('iosAviso');
+  const cerrarAviso = document.getElementById('cerrarAviso');
+
+  if (cerrarAviso && aviso) {
+    cerrarAviso.addEventListener('click', () => aviso.classList.remove('show'));
+  }
+
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    if (btn) {
+      btn.classList.add('show');
+      btn.textContent = '⬇️ Instalar app';
+    }
+  });
+
+  if (btn) {
+    btn.addEventListener('click', async () => {
+      if (deferredPrompt) {
+        deferredPrompt.prompt();
+        try {
+          const { outcome } = await deferredPrompt.userChoice;
+          console.log('Instalación:', outcome);
+        } catch (_) {}
+        deferredPrompt = null;
+        btn.classList.remove('show');
+      } else {
+        if (aviso) aviso.classList.add('show');
+      }
+    });
+  }
+
+  window.addEventListener('appinstalled', () => {
+    if (btn) btn.classList.remove('show');
+    deferredPrompt = null;
+    console.log('✅ CromaSense instalada');
+  });
+
+  const ua = navigator.userAgent || '';
+  const esiOS = /iPad|iPhone|iPod/.test(ua) ||
+                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const esAndroid = /Android/.test(ua);
+  const yaInstalada = window.matchMedia('(display-mode: standalone)').matches ||
+                      window.matchMedia('(display-mode: window-controls-overlay)').matches ||
+                      window.navigator.standalone === true;
+
+  if (btn && !yaInstalada) {
+    if (esiOS) {
+      btn.textContent = '📲 Añadir a inicio';
+      btn.classList.add('show');
+    } else if (esAndroid || /Chrome|Edg/.test(ua)) {
+      setTimeout(() => {
+        if (!deferredPrompt && !yaInstalada) {
+          btn.classList.add('show');
+        }
+      }, 2000);
+    }
+  }
+
+  if (yaInstalada && btn) btn.classList.remove('show');
+
+  /* ---------- 5. SHORTCUTS DEL MANIFEST (?accion=...) ---------- */
+  const params = new URLSearchParams(location.search);
+  const accion = params.get('accion');
+
+  if (accion === 'camara') {
+    window.addEventListener('load', () => {
+      setTimeout(() => {
+        const btnCam = document.getElementById('btnCamara');
+        if (btnCam) btnCam.click();
+      }, 800);
+    });
+  } else if (accion === 'entrenar') {
+    window.addEventListener('load', () => {
+      setTimeout(() => {
+        const btnEnt = document.getElementById('btnEntrenar');
+        if (btnEnt) btnEnt.click();
+      }, 800);
+    });
+  }
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      console.log('🔄 CromaSense actualizada');
+    });
+  }
+
+})();
+
+/* ============================================================
+   1. CATÁLOGO
+   ============================================================ */
+const FAMILIAS = {C:"Cálido", F:"Frío", N:"Neutro", X:"Neón"};
+const TEMAS = {
+  C:{borde:'#fbbf24',sombra:'rgba(251,191,36,.5)',fondo:'#14100a'},
+  F:{borde:'#10b981',sombra:'rgba(16,185,129,.5)',fondo:'#0a1410'},
+  N:{borde:'#94a89c',sombra:'rgba(148,168,156,.45)',fondo:'#0c0f0d'},
+  X:{borde:'#f472b6',sombra:'rgba(244,114,182,.55)',fondo:'#140a12'}
+};
+const BASE = `Rojo|#ff0000|C;Rojo oscuro|#8b0000|C;Carmesí|#dc143c|C;Escarlata|#ff2400|C;Vino|#722f37|C;Granate|#800020|C;Coral|#ff7f50|C;Salmón|#fa8072|C;Naranja|#ff8c00|C;Mandarina|#ffa347|C;Amarillo|#ffe600|C;Amarillo claro|#fff59d|C;Mostaza|#e1ad01|C;Dorado|#d4af37|C;Durazno|#ffcba4|C;Terracota|#c65d3b|C;Marrón|#8b4513|C;Chocolate|#4e2a14|C;Café con leche|#a67b5b|C;Beige|#e8d8b0|C;Rosado|#ffc0cb|C;Rosa fuerte|#ff69b4|C;Fucsia|#e6007e|C;Magenta|#ff00ff|C;Verde lima|#a4de02|C;Azul|#0000ff|F;Azul marino|#000080|F;Azul rey|#2a52be|F;Azul cielo|#87ceeb|F;Celeste|#4fc3f7|F;Azul acero|#4682b4|F;Cian|#00ffff|F;Turquesa|#30d5c8|F;Verde azulado|#008080|F;Verde|#00a000|F;Verde oscuro|#006400|F;Verde bosque|#228b22|F;Verde oliva|#808000|F;Verde menta|#98ffcc|F;Verde claro|#90ee90|F;Esmeralda|#009b77|F;Violeta|#8a2be2|F;Púrpura|#800080|F;Índigo|#4b0082|F;Lavanda|#b39ddb|F;Lila|#c8a2c8|F;Negro|#000000|N;Blanco|#ffffff|N;Gris claro|#d3d3d3|N;Plata|#c0c0c0|N;Gris|#808080|N;Gris oscuro|#404040|N;Crema|#fffdd0|N;Verde neón|#39ff14|X;Rosa neón|#ff10f0|X;Cian neón|#00f0ff|X;Amarillo neón|#f7ff00|X;Naranja neón|#ff6a00|X;Violeta neón|#bc13fe|X;Azul neón|#1f51ff|X`;
+
+function hexARgb(h){return [parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)];}
+const catalogoBase = BASE.split(';').map(s=>{const [n,h,f]=s.split('|');return {nombre:n,rgb:hexARgb(h),fam:f};});
+
+let personalizados = [];
+try{personalizados = JSON.parse(localStorage.getItem('cv_personalizados')||'[]');}catch(e){personalizados=[];}
+const catalogoTotal = () => catalogoBase.concat(personalizados);
+
+/* ============================================================
+   2. CARACTERÍSTICAS
+   ============================================================ */
+function hsl(r,g,b){
+  r/=255;g/=255;b/=255;
+  const mx=Math.max(r,g,b),mn=Math.min(r,g,b),d=mx-mn,l=(mx+mn)/2;
+  let h=0,s=0;
+  if(d>0){
+    s=d/(1-Math.abs(2*l-1));
+    if(mx===r)h=((g-b)/d)%6;else if(mx===g)h=(b-r)/d+2;else h=(r-g)/d+4;
+    h*=60;if(h<0)h+=360;
+  }
+  return [h,s,l];
+}
+function caracteristicas(r,g,b){
+  const [h,s,l]=hsl(r,g,b), a=h*Math.PI/180;
+  return [r/255,g/255,b/255,s,l,s*Math.cos(a),s*Math.sin(a)];
+}
+function familiaAuto(r,g,b){
+  const [h,s,l]=hsl(r,g,b);
+  if(s<0.12||l<0.06||l>0.94)return 'N';
+  return (h<70||h>=300)?'C':'F';
+}
+
+/* ============================================================
+   3. MODELO
+   ============================================================ */
+let modelo=null, nombres=[], entrenado=false;
+const $=id=>document.getElementById(id);
+
+function crearModelo(n){
+  const m=tf.sequential();
+  m.add(tf.layers.dense({inputShape:[7],units:96,activation:'relu'}));
+  m.add(tf.layers.dense({units:64,activation:'relu'}));
+  m.add(tf.layers.dense({units:n,activation:'softmax'}));
+  m.compile({optimizer:tf.train.adam(0.008),loss:'categoricalCrossentropy',metrics:['accuracy']});
+  return m;
+}
+function generarDatos(cat){
+  const xs=[],ys=[],N=cat.length;
+  cat.forEach((c,idx)=>{
+    const reps = idx>=catalogoBase.length ? 90 : 45;
+    for(let k=0;k<reps;k++){
+      const j = k===0?0:12;
+      const rgb=c.rgb.map(v=>Math.min(255,Math.max(0,v+(Math.random()*2-1)*j)));
+      xs.push(caracteristicas(...rgb));
+      const y=new Array(N).fill(0);y[idx]=1;ys.push(y);
+    }
+  });
+  return {xs:tf.tensor2d(xs),ys:tf.tensor2d(ys)};
+}
+function estado(t){$('estado').textContent=t;}
+
+async function entrenarModelo(){
+  const btn=$('btnEntrenar');
+  btn.disabled=true;btn.textContent='⏳ Entrenando...';
+  $('prog').style.display='block';$('progBar').style.width='0%';
+  await tf.nextFrame();
+  const cat=catalogoTotal();
+  const {xs,ys}=generarDatos(cat);
+  if(modelo)modelo.dispose();
+  modelo=crearModelo(cat.length);
+  const EP=50;
+  const h=await modelo.fit(xs,ys,{epochs:EP,batchSize:64,shuffle:true,verbose:0,callbacks:{
+    onEpochEnd:async(e)=>{$('progBar').style.width=((e+1)/EP*100)+'%';estado(`Época ${e+1}/${EP}`);await tf.nextFrame();}
+  }});
+  xs.dispose();ys.dispose();
+  nombres=cat.map(c=>c.nombre);
+  entrenado=true;
+  const acc=(h.history.acc||h.history.accuracy).slice(-1)[0];
+  try{
+    await modelo.save('indexeddb://colorvision-modelo');
+    localStorage.setItem('cv_nombres',JSON.stringify(nombres));
+    estado(`✅ IA entrenada (precisión ${(acc*100).toFixed(1)}%)`);
+  }catch(e){estado('⚠️ Entrenada, pero no se pudo guardar');}
+  btn.disabled=false;btn.textContent='🧠 Entrenar IA';
+  $('prog').style.display='none';
+  $('categoria').textContent='✅ IA lista';
+  $('certeza').textContent='Mueve los sliders o usa la cámara';
+  clasificarColor(+sliderR.value,+sliderG.value,+sliderB.value);
+}
+async function cargarGuardado(){
+  try{
+    const n=JSON.parse(localStorage.getItem('cv_nombres')||'null');
+    if(!n)return;
+    modelo=await tf.loadLayersModel('indexeddb://colorvision-modelo');
+    nombres=n;entrenado=true;
+    estado('📂 IA cargada desde la memoria');
+    $('categoria').textContent='✅ IA lista';
+    $('certeza').textContent='Mueve los sliders o usa la cámara';
+  }catch(e){modelo=null;entrenado=false;}
+}
+async function borrarMemoria(){
+  try{await tf.io.removeModel('indexeddb://colorvision-modelo');}catch(e){}
+  localStorage.removeItem('cv_nombres');localStorage.removeItem('cv_personalizados');
+  personalizados=[];modelo=null;entrenado=false;nombres=[];
+  pintarLista();estado('🗑 Memoria borrada');
+  $('categoria').textContent='Esperando...';$('top3').innerHTML='';
+}
+
+/* ============================================================
+   4. COLORES PERSONALIZADOS
+   ============================================================ */
+function guardarColor(){
+  const nombre=$('nombreColor').value.trim();
+  if(!nombre){estado('✏️ Escribe un nombre');$('nombreColor').focus();return;}
+  const rgb=[+sliderR.value,+sliderG.value,+sliderB.value];
+  personalizados.push({nombre,rgb,fam:familiaAuto(...rgb),propio:true});
+  localStorage.setItem('cv_personalizados',JSON.stringify(personalizados));
+  $('nombreColor').value='';pintarLista();
+  estado(`💾 "${nombre}" guardado. Entrena de nuevo.`);
+}
+function pintarLista(){
+  const l=$('lista');l.innerHTML='';
+  personalizados.forEach((c,i)=>{
+    const d=document.createElement('div');d.className='chip';
+    d.innerHTML=`<i style="background:rgb(${c.rgb})"></i><span></span><button aria-label="Quitar">✕</button>`;
+    d.querySelector('span').textContent=c.nombre;
+    d.querySelector('button').onclick=()=>{personalizados.splice(i,1);localStorage.setItem('cv_personalizados',JSON.stringify(personalizados));pintarLista();estado('Color quitado. Entrena de nuevo.');};
+    l.appendChild(d);
+  });
+}
+
+/* ============================================================
+   5. PREDICCIÓN
+   ============================================================ */
+let ocupado=false;
+async function clasificarColor(r,g,b){
+  $('cajaMostrado').style.background=`rgb(${r},${g},${b})`;
+  $('txtMostrado').textContent=`RGB(${r}, ${g}, ${b})`;
+  if(!entrenado||!modelo){
+    $('categoria').textContent='⚠️ Primero entrena la IA';
+    $('certeza').textContent='Pulsa "Entrenar IA"';return;
+  }
+  if(ocupado)return;ocupado=true;
+  try{
+    const p=tf.tidy(()=>modelo.predict(tf.tensor2d([caracteristicas(r,g,b)])));
+    const d=await p.data();p.dispose();
+    const orden=[...d].map((v,i)=>[v,i]).sort((a,b)=>b[0]-a[0]).slice(0,3);
+    const cat=catalogoTotal();
+    const [pm,im]=orden[0];
+    const c=cat.find(x=>x.nombre===nombres[im])||cat[im];
+    const pct=(pm*100).toFixed(1);
+    const rgbE=c.rgb;
+    $('categoria').textContent=c.nombre;
+    $('familia').textContent='Familia: '+FAMILIAS[c.fam]+(c.propio?' (tu color)':'');
+    $('certeza').innerHTML=`Confianza: <b>${pct}%</b><span class="chip-sw" style="background:rgb(${rgbE})"></span>`;
+    $('barra').style.width=pct+'%';
+    $('barra').style.background=`rgb(${rgbE})`;
+    $('cajaEntrenado').style.background=`rgb(${rgbE})`;
+    $('txtEntrenado').textContent=`${c.nombre} · RGB(${rgbE.join(', ')})`;
+    $('top3').innerHTML=orden.map(([v,i])=>`<li><span>${nombres[i]}</span><b>${(v*100).toFixed(1)}%</b></li>`).join('');
+    aplicarTema(c.fam,parseFloat(pct));
+  }catch(e){console.error(e);}
+  ocupado=false;
+}
+function aplicarTema(f,certeza){
+  const t=TEMAS[f]||TEMAS.N,tj=$('tarjetaPrincipal');
+  const root=document.documentElement.style;
+  root.setProperty('--border',t.borde+'33');
+  root.setProperty('--shadow',`0 20px 50px ${t.sombra}`);
+  tj.classList.toggle('alta-certeza',certeza>90);
+}
+
+/* ============================================================
+   6. SLIDERS Y BOTONES
+   ============================================================ */
+const sliderR=$('sliderR'),sliderG=$('sliderG'),sliderB=$('sliderB');
+function actualizarPreview(){
+  const r=+sliderR.value,g=+sliderG.value,b=+sliderB.value;
+  $('valR').textContent=r;$('valG').textContent=g;$('valB').textContent=b;
+  $('preview').style.background=`rgb(${r},${g},${b})`;
+}
+[sliderR,sliderG,sliderB].forEach(s=>s.addEventListener('input',()=>{
+  actualizarPreview();clasificarColor(+sliderR.value,+sliderG.value,+sliderB.value);
+}));
+$('btnClasificar').onclick=()=>clasificarColor(+sliderR.value,+sliderG.value,+sliderB.value);
+$('btnEntrenar').onclick=entrenarModelo;
+$('btnGuardarColor').onclick=guardarColor;
+$('btnBorrar').onclick=borrarMemoria;
+$('nombreColor').addEventListener('keydown',e=>{if(e.key==='Enter')guardarColor();});
+
+/* ============================================================
+   7. CÁMARA
+   ============================================================ */
+const video=$('video'),canvas=$('canvasCamara'),ctx=canvas.getContext('2d',{willReadFrequently:true});
+let stream=null,intervalo=null;
+
+function setInfo(msg, tipo){
+  const el=$('infoCamara');
+  el.className='info'+(tipo?' '+tipo:'');
+  el.innerHTML=msg;
+}
+
+async function iniciarCamara(){
+  if(stream) return;
+
+  if(!window.isSecureContext){
+    setInfo(
+      '❌ <b>La cámara requiere un contexto seguro.</b><br>' +
+      'Estás abriendo el archivo como <code>file://</code>.<br><br>' +
+      '<b>Soluciones:</b><br>' +
+      '• Abre el archivo con <b>Firefox</b><br>' +
+      '• Sirve la carpeta con <code>python -m http.server 8000</code><br>' +
+      '• Súbelo a Netlify, GitHub Pages o cualquier hosting HTTPS',
+      'error'
+    );
+    return;
+  }
+
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    setInfo('❌ Tu navegador no soporta <code>getUserMedia</code>.','error');
+    return;
+  }
+
+  setInfo('📷 Solicitando permiso para la cámara...');
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({
+      video:{facingMode:{ideal:'environment'},width:{ideal:640},height:{ideal:480}},
+      audio:false
+    });
+
+    video.srcObject = stream;
+    video.style.display = 'block';
+    setInfo('📷 Apunta el centro de la imagen a un color...','ok');
+
+    video.onloadedmetadata = () => {
+      canvas.width  = video.videoWidth;
+      canvas.height = video.videoHeight;
+      intervalo = setInterval(analizarFrame, 500);
+    };
+
+  }catch(err){
+    let msg = '❌ ';
+    switch(err.name){
+      case 'NotAllowedError':
+      case 'PermissionDeniedError':
+        msg += '<b>Permiso denegado.</b><br>Toca el candado 🔒 en la barra de direcciones y permite el acceso.';
+        break;
+      case 'NotFoundError':
+      case 'DevicesNotFoundError':
+        msg += '<b>No se encontró ninguna cámara</b> en este dispositivo.';
+        break;
+      case 'NotReadableError':
+      case 'TrackStartError':
+        msg += '<b>La cámara está en uso</b> por otra aplicación. Ciérrala e inténtalo de nuevo.';
+        break;
+      case 'OverconstrainedError':
+        msg += 'La cámara no soporta la resolución solicitada.';
+        break;
+      case 'SecurityError':
+        msg += '<b>Bloqueado por seguridad.</b> Necesitas HTTPS o localhost.';
+        break;
+      default:
+        msg += (err.message || 'Error desconocido al acceder a la cámara.');
+    }
+    setInfo(msg,'error');
+    console.error('Error cámara:', err);
+  }
+}
+
+function detenerCamara(){
+  clearInterval(intervalo);intervalo=null;
+  if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}
+  video.style.display='none';
+  setInfo('⏹ Cámara detenida');
+}
+
+function analizarFrame(){
+  if(!video.videoWidth)return;
+  ctx.drawImage(video,0,0,canvas.width,canvas.height);
+  const t=20,cx=Math.floor(canvas.width/2-t/2),cy=Math.floor(canvas.height/2-t/2);
+  const px=ctx.getImageData(cx,cy,t,t).data;
+  let R=0,G=0,B=0;const n=px.length/4;
+  for(let i=0;i<px.length;i+=4){R+=px[i];G+=px[i+1];B+=px[i+2];}
+  const r=Math.round(R/n),g=Math.round(G/n),b=Math.round(B/n);
+  sliderR.value=r;sliderG.value=g;sliderB.value=b;actualizarPreview();
+  clasificarColor(r,g,b);
+  setInfo(`🎯 Detectado: RGB(${r}, ${g}, ${b}) <span class="chip-sw" style="background:rgb(${r},${g},${b})"></span>`,'ok');
+}
+
+$('btnCamara').onclick=iniciarCamara;
+$('btnDetenerCamara').onclick=detenerCamara;
+
+/* ============================================================
+   8. INICIO
+   ============================================================ */
+actualizarPreview();pintarLista();
+clasificarColor(128,128,128);
+cargarGuardado().then(()=>clasificarColor(+sliderR.value,+sliderG.value,+sliderB.value));
+</script>
+</body>
+</html>
